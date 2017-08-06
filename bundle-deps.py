@@ -14,7 +14,10 @@ with open('dlldeps-whitelist.%s' % platform_id, 'r') as f:
         if platform_id == 'win32': line = line.lower()
         deps_whitelist.add(line)
 
-QT5_DIR = os.environ['QT5_DIR']
+try:
+    QT5_DIR = os.environ['QT5_DIR']
+except KeyError:
+    print('error: environment variable QT5_DIR is not set')
 
 def get_msys_dir_win32():
     for line in subprocess.check_output(['mount']).split('\n'):
