@@ -23,80 +23,55 @@ def is_dep_whitelisted(d):
     else:
         return d.lower() in deps_whitelist_lower
 
-try:
-    QT5_DIR = os.environ['QT5_DIR']
-except KeyError:
-    print('error: environment variable QT5_DIR is not set')
-
 def get_msys_dir_win32():
     for line in subprocess.check_output(['mount']).split('\n'):
         line = line.split()
         if line[1] == 'on' and line[2] == '/':
             return line[0]
 
-lib_search_path = []
-lib_search_path.append('.')
-if platform_id == 'linux':
-    lib_search_path.append('/lib')
-    lib_search_path.append('/lib/%s-linux-gnu' % platform.machine())
-    lib_search_path.append('/usr/lib')
-    lib_search_path.append('/usr/lib/%s-linux-gnu' % platform.machine())
-    lib_search_path.append('/usr/local/lib')
-    lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
-elif platform_id == 'macos':
-    lib_search_path.append('/usr/local/lib')
-    lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
-elif platform_id == 'win32':
-    WINDIR = os.environ.get('WINDIR', 'c:/windows')
-    lib_search_path.append('%s/system32' % WINDIR)
-    MSYSDIR = get_msys_dir_win32()
-    if MSYSDIR is None: MSYSDIR = 'c:/msys64'
-    lib_search_path.append('%s/mingw64/bin' % MSYSDIR)
+def normalize_dep(dep, lib_search_path, strategy):
+    def apply_dep_resolution_strategy(dep, lib_search_path, strategy):
+        if len(strategy) == 0:
+            yield os.path.normpath(dep)
+        else:
+            for dep1 in strategy[0](dep, lib_search_path):
+                yield from apply_dep_resolution_strategy(dep1, lib_search_path, strategy[1:])
+
+    for dep1 in apply_dep_resolution_strategy(dep, lib_search_path, strategy[::-1]):
+        if os.path.exists(dep1):
+            return dep1
+    raise RuntimeError('dependency %s could not be resolved to any valid file')
 
 def find_in_search_path(dep, lib_search_path):
     # if does not exist, look in lib_search_path:
-    if os.path.exists(dep): return
+    yield dep
     for path in lib_search_path:
-        p = os.path.join(path, dep)
-        if os.path.exists(p):
-            return p
+        yield os.path.join(path, dep)
 
-def strip_one_version_component_linux(dep):
+def strip_one_version_component_linux(dep, lib_search_path):
     # XXX: try stripping away last version component
-    if os.path.exists(dep): return
-    m = re.match(r'^(.*)\.so(\.\d+)(.*)', dep)
-    if m: return '%s.so%s' % (m.group(1), m.group(3))
+    yield dep
+    while True:
+        m = re.match(r'^(.*)\.so(\.\d+)(.*)', dep)
+        if m:
+            dep = '%s.so%s' % (m.group(1), m.group(3))
+            yield dep
+        else:
+            break
 
 def normalize_dep_linux(dep, lib_search_path):
-    dep1 = find_in_search_path(dep, lib_search_path)
-    if dep1: return normalize_dep_linux(dep1, lib_search_path)
+    return normalize_dep(dep, lib_search_path, [strip_one_version_component_linux, find_in_search_path])
 
-    dep1 = strip_one_version_component_linux(dep)
-    if dep1: return normalize_dep_linux(dep1, lib_search_path)
-
-    return dep
-
-def getdeps_linux(lib0, result=None, recursive=True):
-    if result is None: result = set()
-    libdir = os.path.abspath(os.path.dirname(lib0))
+def scandeps_linux(lib0):
     for line in subprocess.check_output(['ldd', lib0]).split('\n'):
         if not line: continue
         m = re.match(r'^\s*((\S+) => )?((\S*) \((0x[0-9a-f]+)\)|not found)$', line)
         if m:
             lib = m.group(2) if m.group(2) else m.group(4)
             if lib == 'linux-vdso.so.1': continue
-            libn = normalize_dep_linux(lib, [libdir] + lib_search_path)
-            libn = os.path.normpath(libn)
-            if not os.path.exists(libn):
-                raise RuntimeError('dependency not found: %s (normalized: %s)' % (lib, libn))
-            if libn not in result and is_dep_whitelisted(libn):
-                result.add(libn)
-                if recursive:
-                    getdeps_linux(libn, result, True)
-            continue
-    return result
+            yield lib
 
-def truncate_framework_dep_macos(dep):
+def truncate_framework_dep_macos(dep, lib_search_path):
     # truncate dep at the first occurrence of *.framework/
     comps = os.path.normpath(dep).split(os.path.sep)
     comps1 = []
@@ -105,67 +80,46 @@ def truncate_framework_dep_macos(dep):
         if re.match(r'^.*\.framework$', c):
             break
     if len(comps1) < len(comps):
-        return os.path.sep.join(comps1)
+        yield os.path.sep.join(comps1)
+    else:
+        yield dep
 
 def replace_special_paths_macos(dep, lib_search_path):
     # replace @rpath and similar:
-    if os.path.exists(dep): return
+    yield dep
     for pfx in ('@rpath', '@loader_path'):
         m = re.match('^%s/(.*)$' % pfx, dep)
         if m:
             for path in lib_search_path:
-                p = os.path.join(path, m.group(1))
-                if os.path.exists(p):
-                    return p
+                yield os.path.join(path, m.group(1))
 
-def strip_one_version_component_macos(dep):
+def strip_one_version_component_macos(dep, lib_search_path):
     # XXX: try stripping away last version component
-    if os.path.exists(dep): return
-    m = re.match(r'^(.*)(\.\d+)\.dylib', dep)
-    if m: return '%s.dylib' % m.group(1)
+    yield dep
+    while True:
+        m = re.match(r'^(.*)(\.\d+)\.dylib', dep)
+        if m:
+            dep = '%s.dylib' % m.group(1)
+            yield dep
+        else:
+            break
 
 def normalize_dep_macos(dep, lib_search_path):
-    dep1 = truncate_framework_dep_macos(dep)
-    if dep1: return normalize_dep_macos(dep1, lib_search_path)
-
-    dep1 = replace_special_paths_macos(dep, lib_search_path)
-    if dep1: return normalize_dep_macos(dep1, lib_search_path)
-
-    dep1 = find_in_search_path(dep, lib_search_path)
-    if dep1: return normalize_dep_macos(dep1, lib_search_path)
-
-    dep1 = strip_one_version_component_macos(dep)
-    if dep1: return normalize_dep_macos(dep1, lib_search_path)
-
-    return dep
+    return normalize_dep(dep, lib_search_path, [truncate_framework_dep_macos, strip_one_version_component_macos, replace_special_paths_macos, find_in_search_path])
 
 def is_framework_macos(dep):
     return os.path.isdir(dep) and re.match(r'^.*\.framework$', dep)
 
-def getdeps_macos(lib0, result=None, recursive=True):
+def scandeps_macos(lib0):
     if is_framework_macos(lib0): return
-    if result is None: result = set()
-    libdir = os.path.abspath(os.path.dirname(lib0))
-    for line in subprocess.check_output(['otool', '-L', lib0]).split('\n'):
+    for line in subprocess.check_output(['otool', '-L', lib0]).decode('utf8').split('\n'):
         m = re.match(r'^\s*(\S*) \(.*\)$', line)
         if m:
             lib = m.group(1)
-            libn = normalize_dep_macos(lib, [libdir] + lib_search_path)
-            libn = os.path.normpath(libn)
-            if not os.path.exists(libn):
-                raise RuntimeError('dependency not found: %s (normalized: %s)' % (lib, libn))
-            if libn not in result and not is_dep_whitelisted(libn):
-                result.add(libn)
-                if recursive:
-                    getdeps_macos(libn, result, True)
-            continue
-    return result
+            yield lib
 
 def normalize_dep_win32(dep, lib_search_path):
-    dep1 = find_in_search_path(dep, lib_search_path)
-    if dep1: return normalize_dep_win32(dep1, lib_search_path)
-
-    return dep
+    return normalize_dep(dep, lib_search_path, [find_in_search_path])
 
 def find_dumpbin_win32():
     msvc_dir = None
@@ -183,10 +137,7 @@ def find_dumpbin_win32():
         return l[-1]
     raise RuntimeError('cannot find dumpbin.exe in MSVC directory')
 
-def getdeps_win32(lib0, result=None, recursive=True):
-    if not os.path.exists(lib0): return
-    if result is None: result = set()
-    libdir = os.path.abspath(os.path.dirname(lib0))
+def scandeps_win32(lib0):
     p = 0
     has_dld = False
     for line in subprocess.check_output([find_dumpbin_win32(), '/dependents', lib0]).split('\n'):
@@ -204,27 +155,71 @@ def getdeps_win32(lib0, result=None, recursive=True):
         if m:
             lib = m.group(1)
             if re.match(r'(api|ext)-ms-(win|onecore|onecoreuap|mf)-.*.dll', lib, re.IGNORECASE): continue
-            libn = normalize_dep_win32(lib, [libdir] + lib_search_path)
-            libn = os.path.normpath(libn)
+            if has_dld:
+                raise RuntimeError('%s has delay load dependencies' % lib0)
+            yield lib
+
+def getdeps(lib0, search_path, recursive=True, search_in_target_path=True):
+    def getdeps_aux(lib0, lib_search_path, scandeps_fn, normalize_fn, recursive=True, result=None):
+        for lib in scandeps_fn(lib0):
+            libn = normalize_fn(lib, lib_search_path)
             if is_dep_whitelisted(libn): continue
-            #if not os.path.exists(libn):
-            #    raise RuntimeError('dependency not found: %s (normalized: %s)' % (lib, libn))
             if libn not in result:
-                if has_dld:
-                    raise RuntimeError('%s has delay load dependencies' % lib0)
                 result.add(libn)
                 if recursive:
-                    getdeps_win32(libn, result, True)
+                    getdeps_aux(libn, lib_search_path, scandeps_fn, normalize_fn, True, result)
             continue
+
+    search_path1 = []
+    if search_in_target_path:
+        target_path = os.path.abspath(os.path.dirname(lib0))
+        search_path1.append(target_path)
+    for path in search_path:
+        search_path1.append(path)
+
+    if platform_id == 'linux':
+        scandeps_fn, normalize_fn = scandeps_linux, normalize_dep_linux
+    elif platform_id == 'macos':
+        scandeps_fn, normalize_fn = scandeps_macos, normalize_dep_macos
+    elif platform_id == 'win32':
+        scandeps_fn, normalize_fn = scandeps_win32, normalize_dep_win32
+
+    result = set()
+    getdeps_aux(lib0, search_path1, scandeps_fn, normalize_fn, recursive, result)
     return result
 
-def getdeps(lib0, result=None, recursive=True):
-    if platform_id == 'linux':
-        return getdeps_linux(lib0, result, recursive)
-    elif platform_id == 'macos':
-        return getdeps_macos(lib0, result, recursive)
-    elif platform_id == 'win32':
-        return getdeps_win32(lib0, result, recursive)
+def main(args):
+    try:
+        QT5_DIR = os.environ['QT5_DIR']
+    except KeyError:
+        print('error: environment variable QT5_DIR is not set')
 
-deps = getdeps(sys.argv[1])
-for dep in deps: print(dep)
+    recursive = False
+    if args[0] == '-r':
+        args = args[1:]
+        recursive = True
+
+    lib_search_path = []
+    if platform_id == 'linux':
+        lib_search_path.append('/lib')
+        lib_search_path.append('/lib/%s-linux-gnu' % platform.machine())
+        lib_search_path.append('/usr/lib')
+        lib_search_path.append('/usr/lib/%s-linux-gnu' % platform.machine())
+        lib_search_path.append('/usr/local/lib')
+        lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
+    elif platform_id == 'macos':
+        lib_search_path.append('/usr/local/lib')
+        lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
+    elif platform_id == 'win32':
+        WINDIR = os.environ.get('WINDIR', 'c:/windows')
+        lib_search_path.append('%s/system32' % WINDIR)
+        MSYSDIR = get_msys_dir_win32()
+        if MSYSDIR is None: MSYSDIR = 'c:/msys64'
+        lib_search_path.append('%s/mingw64/bin' % MSYSDIR)
+
+    deps = getdeps(args[0], lib_search_path, recursive)
+    for dep in deps: print(dep)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
+
