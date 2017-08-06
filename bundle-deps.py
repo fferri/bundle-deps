@@ -199,6 +199,11 @@ def main(args):
         args = args[1:]
         recursive = True
 
+    dry_run = False
+    if args[0] == '-n':
+        args = args[1:]
+        dry_run = True
+
     lib_search_path = []
     if platform_id == 'linux':
         lib_search_path.append('/lib')
@@ -217,8 +222,17 @@ def main(args):
         if MSYSDIR is None: MSYSDIR = 'c:/msys64'
         lib_search_path.append('%s/mingw64/bin' % MSYSDIR)
 
-    deps = getdeps(args[0], lib_search_path, recursive)
-    for dep in deps: print(dep)
+    target = args[0]
+    target_path = os.path.abspath(os.path.dirname(target))
+    deps = getdeps(target, lib_search_path, recursive)
+    for dep in deps:
+        dest = os.path.join(target_path, os.path.basename(dep))
+        if dep == dest:
+            continue
+        if dry_run:
+            print(dep,'->',dest)
+        else:
+            print(subprocess.check_output(['cp', '-a', dep, dest]))
 
 if __name__ == '__main__':
     main(sys.argv[1:])
