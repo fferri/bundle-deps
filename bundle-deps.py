@@ -39,10 +39,10 @@ elif platform_id == 'macos':
     lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
 elif platform_id == 'win32':
     WINDIR = os.environ.get('WINDIR', 'c:/windows')
-    lib_search_path.append('%s/system32' % WINDIR)
+    lib_search_path.append('%s/system32' % WINDIR.lower())
     MSYSDIR = get_msys_dir_win32()
     if MSYSDIR is None: MSYSDIR = 'c:/msys64'
-    lib_search_path.append('%s/mingw64/bin' % MSYSDIR)
+    lib_search_path.append('%s/mingw64/bin' % MSYSDIR.lower())
 
 def find_in_search_path(dep, lib_search_path):
     # if does not exist, look in lib_search_path:
@@ -163,6 +163,7 @@ def getdeps_win32(lib0, result=None, recursive=True):
     if result is None: result = set()
     libdir = os.path.abspath(os.path.dirname(lib0))
     p = 0
+    has_dld = False
     for line in subprocess.check_output(['c:/Program Files (x86)/Microsoft Visual Studio/2017/Community/VC/Tools/MSVC/14.10.25017/bin/HostX64/x64/dumpbin.exe', '/dependents', lib0]).split('\n'):
         line = line.strip()
         if re.match(r'.*\bImage has the following dependencies\b.*', line):
@@ -171,24 +172,25 @@ def getdeps_win32(lib0, result=None, recursive=True):
         if re.match(r'.*\bSummary\b.*', line):
             p = 0
             continue
-        #if re.match(r'.*\bImage has the following delay load dependencies\b.*', line):
-        #    print('RECHECK DUMPBIN OUTPUT OF %s' % lib0)
-        #    return
+        if re.match(r'.*\bImage has the following delay load dependencies\b.*', line):
+            has_dld = True
         if not line or not p: continue
         m = re.match(r'^\s*(\S+)\s*$', line)
         if m:
             lib = m.group(1).lower()
-            if re.match(r'api-ms-win-.*.dll', lib): continue
+            if re.match(r'(api|ext)-ms-(win|onecore|onecoreuap|mf)-.*.dll', lib): continue
             libn = normalize_dep_win32(lib, [libdir] + lib_search_path)
             libn = os.path.normpath(libn)
+            if libn in deps_whitelist: continue
             #if not os.path.exists(libn):
             #    raise RuntimeError('dependency not found: %s (normalized: %s)' % (lib, libn))
-            if libn not in result and libn not in deps_whitelist:
+            if libn not in result:
+                if has_dld:
+                    raise RuntimeError('%s has delay load dependencies' % lib0)
                 result.add(libn)
                 if recursive:
                     getdeps_win32(libn, result, True)
             continue
-        print('unmatched-dumpbin-line: %s' % line)
     return result
 
 def getdeps(lib0, result=None, recursive=True):
