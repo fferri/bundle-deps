@@ -1,18 +1,27 @@
-import platform
+import glob
 import os
+import platform
 import re
 import sys
 import subprocess
 
 platform_ids = {'Linux': 'linux', 'Darwin': 'macos', 'Windows': 'win32', 'MINGW64_NT': 'win32'}
 platform_id = platform_ids[platform.system().split('-')[0]]
+platform_case_sensitive = platform_id != 'win32'
 
 deps_whitelist = set()
+deps_whitelist_lower = set()
 with open('dlldeps-whitelist.%s' % platform_id, 'r') as f:
     for line in f:
         line = line.rstrip()
-        if platform_id == 'win32': line = line.lower()
         deps_whitelist.add(line)
+        deps_whitelist_lower.add(line.lower())
+
+def is_dep_whitelisted(d):
+    if platform_case_sensitive:
+        return d in deps_whitelist
+    else:
+        return d.lower() in deps_whitelist_lower
 
 try:
     QT5_DIR = os.environ['QT5_DIR']
@@ -39,10 +48,10 @@ elif platform_id == 'macos':
     lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
 elif platform_id == 'win32':
     WINDIR = os.environ.get('WINDIR', 'c:/windows')
-    lib_search_path.append('%s/system32' % WINDIR.lower())
+    lib_search_path.append('%s/system32' % WINDIR)
     MSYSDIR = get_msys_dir_win32()
     if MSYSDIR is None: MSYSDIR = 'c:/msys64'
-    lib_search_path.append('%s/mingw64/bin' % MSYSDIR.lower())
+    lib_search_path.append('%s/mingw64/bin' % MSYSDIR)
 
 def find_in_search_path(dep, lib_search_path):
     # if does not exist, look in lib_search_path:
@@ -80,7 +89,7 @@ def getdeps_linux(lib0, result=None, recursive=True):
             libn = os.path.normpath(libn)
             if not os.path.exists(libn):
                 raise RuntimeError('dependency not found: %s (normalized: %s)' % (lib, libn))
-            if libn not in result and libn not in deps_whitelist:
+            if libn not in result and is_dep_whitelisted(libn):
                 result.add(libn)
                 if recursive:
                     getdeps_linux(libn, result, True)
@@ -145,7 +154,7 @@ def getdeps_macos(lib0, result=None, recursive=True):
             libn = os.path.normpath(libn)
             if not os.path.exists(libn):
                 raise RuntimeError('dependency not found: %s (normalized: %s)' % (lib, libn))
-            if libn not in result and libn not in deps_whitelist:
+            if libn not in result and not is_dep_whitelisted(libn):
                 result.add(libn)
                 if recursive:
                     getdeps_macos(libn, result, True)
@@ -158,13 +167,29 @@ def normalize_dep_win32(dep, lib_search_path):
 
     return dep
 
+def find_dumpbin_win32():
+    msvc_dir = None
+    for d1 in ['c:']:
+        for d2 in ['Program Files', 'Program Files (x86)']:
+            for d3 in ['Microsoft Visual Studio']:
+                for d4 in ['2017','2015']:
+                    p = os.path.sep.join([d1,d2,d3,d4,''])
+                    if os.path.isdir(p): msvc_dir = p
+    if not msvc_dir:
+        raise RuntimeError('cannot find MSVC directory')
+    l = glob.glob(msvc_dir+'Community/VC/Tools/MSVC/*/bin/HostX64/x64/dumpbin.exe')
+    l.sort()
+    if os.path.isfile(l[-1]):
+        return l[-1]
+    raise RuntimeError('cannot find dumpbin.exe in MSVC directory')
+
 def getdeps_win32(lib0, result=None, recursive=True):
     if not os.path.exists(lib0): return
     if result is None: result = set()
     libdir = os.path.abspath(os.path.dirname(lib0))
     p = 0
     has_dld = False
-    for line in subprocess.check_output(['c:/Program Files (x86)/Microsoft Visual Studio/2017/Community/VC/Tools/MSVC/14.10.25017/bin/HostX64/x64/dumpbin.exe', '/dependents', lib0]).split('\n'):
+    for line in subprocess.check_output([find_dumpbin_win32(), '/dependents', lib0]).split('\n'):
         line = line.strip()
         if re.match(r'.*\bImage has the following dependencies\b.*', line):
             p = 1
@@ -177,11 +202,11 @@ def getdeps_win32(lib0, result=None, recursive=True):
         if not line or not p: continue
         m = re.match(r'^\s*(\S+)\s*$', line)
         if m:
-            lib = m.group(1).lower()
-            if re.match(r'(api|ext)-ms-(win|onecore|onecoreuap|mf)-.*.dll', lib): continue
+            lib = m.group(1)
+            if re.match(r'(api|ext)-ms-(win|onecore|onecoreuap|mf)-.*.dll', lib, re.IGNORECASE): continue
             libn = normalize_dep_win32(lib, [libdir] + lib_search_path)
             libn = os.path.normpath(libn)
-            if libn in deps_whitelist: continue
+            if is_dep_whitelisted(libn): continue
             #if not os.path.exists(libn):
             #    raise RuntimeError('dependency not found: %s (normalized: %s)' % (lib, libn))
             if libn not in result:
