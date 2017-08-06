@@ -10,6 +10,9 @@ platform_id = platform_ids[platform.system().split('-')[0]]
 platform_case_sensitive = platform_id != 'win32'
 
 def is_dep_whitelisted(d):
+    global deps_whitelist
+    global deps_whitelist_lower
+
     if platform_case_sensitive:
         return d in deps_whitelist
     else:
@@ -181,10 +184,8 @@ def getdeps(lib0, search_path, recursive=True, search_in_target_path=True):
     return result
 
 def main(args):
-    try:
-        QT5_DIR = os.environ['QT5_DIR']
-    except KeyError:
-        print('error: environment variable QT5_DIR is not set')
+    global deps_whitelist
+    global deps_whitelist_lower
 
     from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
     parser = ArgumentParser(formatter_class=RawTextHelpFormatter)
@@ -220,10 +221,8 @@ def main(args):
         lib_search_path.append('/usr/lib')
         lib_search_path.append('/usr/lib/%s-linux-gnu' % platform.machine())
         lib_search_path.append('/usr/local/lib')
-        lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
     elif platform_id == 'macos':
         lib_search_path.append('/usr/local/lib')
-        lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
     elif platform_id == 'win32':
         WINDIR = os.environ.get('WINDIR', 'c:/windows').replace('\\','/')
         lib_search_path.append('%s/system32' % WINDIR)
