@@ -24,7 +24,7 @@ def is_dep_whitelisted(d):
         return d.lower() in deps_whitelist_lower
 
 def get_msys_dir_win32():
-    for line in subprocess.check_output(['mount']).split('\n'):
+    for line in subprocess.check_output(['mount']).decode('utf8').split('\n'):
         line = line.split()
         if line[1] == 'on' and line[2] == '/':
             return line[0]
@@ -63,7 +63,7 @@ def normalize_dep_linux(dep, lib_search_path):
     return normalize_dep(dep, lib_search_path, [strip_one_version_component_linux, find_in_search_path])
 
 def scandeps_linux(lib0):
-    for line in subprocess.check_output(['ldd', lib0]).split('\n'):
+    for line in subprocess.check_output(['ldd', lib0]).decode('utf8').split('\n'):
         if not line: continue
         m = re.match(r'^\s*((\S+) => )?((\S*) \((0x[0-9a-f]+)\)|not found)$', line)
         if m:
@@ -140,7 +140,7 @@ def find_dumpbin_win32():
 def scandeps_win32(lib0):
     p = 0
     has_dld = False
-    for line in subprocess.check_output([find_dumpbin_win32(), '/dependents', lib0]).split('\n'):
+    for line in subprocess.check_output(['env', 'MSYS2_ARG_CONV_EXCL=/dependents', find_dumpbin_win32(), '/dependents', lib0]).decode('utf8').split('\n'):
         line = line.strip()
         if re.match(r'.*\bImage has the following dependencies\b.*', line):
             p = 1
@@ -211,7 +211,7 @@ def main(args):
         lib_search_path.append('/usr/local/lib')
         lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
     elif platform_id == 'win32':
-        WINDIR = os.environ.get('WINDIR', 'c:/windows')
+        WINDIR = os.environ.get('WINDIR', 'c:/windows').replace('\\','/')
         lib_search_path.append('%s/system32' % WINDIR)
         MSYSDIR = get_msys_dir_win32()
         if MSYSDIR is None: MSYSDIR = 'c:/msys64'
