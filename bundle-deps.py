@@ -1,12 +1,11 @@
-from platform import system as platform_system
+import platform
 import os
 import re
 import sys
 import subprocess
 
 platform_ids = {'Linux': 'linux', 'Darwin': 'macos', 'MINGW64_NT': 'win32'}
-platform = platform_system().split('-')[0]
-platform_id = platform_ids[platform]
+platform_id = platform_ids[platform.system().split('-')[0]]
 
 deps_whitelist = set()
 with open('dlldeps-whitelist.%s' % platform_id, 'r') as f:
@@ -18,7 +17,10 @@ QT5_DIR = os.environ['QT5_DIR']
 lib_search_path = []
 lib_search_path.append('.')
 if platform_id == 'linux':
+    lib_search_path.append('/lib')
+    lib_search_path.append('/lib/%s-linux-gnu' % platform.machine())
     lib_search_path.append('/usr/lib')
+    lib_search_path.append('/usr/lib/%s-linux-gnu' % platform.machine())
     lib_search_path.append('/usr/local/lib')
     lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
 elif platform_id == 'macos':
@@ -28,9 +30,25 @@ elif platform_id == 'win32':
     lib_search_path.append('/mingw64/bin')
 
 
-def getdeps_linux(path):
-    out = subprocess.check_output(['ldd', path])
-    print(out)
+def getdeps_linux(lib0, result=None, recursive=True):
+    if result is None: result = set()
+    libdir = os.path.abspath(os.path.dirname(lib0))
+    for line in subprocess.check_output(['ldd', lib0]).split('\n'):
+        if not line: continue
+        m = re.match(r'^\s*((\S+) => )?((\S*) \((0x[0-9a-f]+)\)|not found)$', line)
+        if m:
+            lib = m.group(2) if m.group(2) else m.group(4)
+            if lib == 'linux-vdso.so.1': continue
+            libn = normalize_dep_macos(lib, [libdir] + lib_search_path)
+            libn = os.path.normpath(libn)
+            if not os.path.exists(libn):
+                raise RuntimeError('dependency not found: %s (normalized: %s)' % (lib, libn))
+            if libn not in result and libn not in deps_whitelist:
+                result.add(libn)
+                if recursive:
+                    getdeps_linux(libn, result, True)
+            continue
+    return result
 
 def truncate_framework_dep_macos(dep):
     # truncate dep at the first occurrence of *.framework/
@@ -102,6 +120,7 @@ def getdeps_macos(lib0, result=None, recursive=True):
                 result.add(libn)
                 if recursive:
                     getdeps_macos(libn, result, True)
+            continue
     return result
 
 def getdeps(lib0, result=None, recursive=True):
