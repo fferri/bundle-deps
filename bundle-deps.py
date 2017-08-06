@@ -16,6 +16,12 @@ with open('dlldeps-whitelist.%s' % platform_id, 'r') as f:
 
 QT5_DIR = os.environ['QT5_DIR']
 
+def get_msys_dir_win32():
+    for line in subprocess.check_output(['mount']).split('\n'):
+        line = line.split()
+        if line[1] == 'on' and line[2] == '/':
+            return line[0]
+
 lib_search_path = []
 lib_search_path.append('.')
 if platform_id == 'linux':
@@ -29,8 +35,11 @@ elif platform_id == 'macos':
     lib_search_path.append('/usr/local/lib')
     lib_search_path.append(os.path.join(QT5_DIR, 'lib'))
 elif platform_id == 'win32':
-    lib_search_path.append('c:/windows/system32')
-    lib_search_path.append('c:/msys64/mingw64/bin')
+    WINDIR = os.environ.get('WINDIR', 'c:/windows')
+    lib_search_path.append('%s/system32' % WINDIR)
+    MSYSDIR = get_msys_dir_win32()
+    if MSYSDIR is None: MSYSDIR = 'c:/msys64'
+    lib_search_path.append('%s/mingw64/bin' % MSYSDIR)
 
 def find_in_search_path(dep, lib_search_path):
     # if does not exist, look in lib_search_path:
