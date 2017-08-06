@@ -40,7 +40,7 @@ def normalize_dep(dep, lib_search_path, strategy):
     for dep1 in apply_dep_resolution_strategy(dep, lib_search_path, strategy[::-1]):
         if os.path.exists(dep1):
             return dep1
-    raise RuntimeError('dependency %s could not be resolved to any valid file')
+    raise RuntimeError('dependency %s could not be resolved to any valid file' % dep)
 
 def find_in_search_path(dep, lib_search_path):
     # if does not exist, look in lib_search_path:
@@ -194,17 +194,20 @@ def main(args):
     except KeyError:
         print('error: environment variable QT5_DIR is not set')
 
-    recursive = False
-    if args[0] == '-r':
-        args = args[1:]
-        recursive = True
-
-    dry_run = False
-    if args[0] == '-n':
-        args = args[1:]
-        dry_run = True
+    from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
+    parser = ArgumentParser(formatter_class=RawTextHelpFormatter)
+    parser.add_argument('-r', '--recursive', dest='recursive', action='store_const', const=True, default=False, help='crawl dependencies recursively')
+    parser.add_argument('-n', '--dry-run', dest='dry_run', action='store_const', const=True, default=False, help='just print file which get copied without copying them')
+    parser.add_argument('-v', '--verbose', dest='verbose', action='store_const', const=True, default=False, help='print performed operations')
+    parser.add_argument('-L', '--lib-path', default=[], action='append', metavar='path', help='additional path to search for deps')
+    parser.add_argument('target', help='target to scan for required deps')
+    args = parser.parse_args()
 
     lib_search_path = []
+    for path in args.lib_path:
+        if os.path.isfile(path):
+            path = os.path.dirname(path)
+        lib_search_path.append(path)
     if platform_id == 'linux':
         lib_search_path.append('/lib')
         lib_search_path.append('/lib/%s-linux-gnu' % platform.machine())
@@ -222,17 +225,19 @@ def main(args):
         if MSYSDIR is None: MSYSDIR = 'c:/msys64'
         lib_search_path.append('%s/mingw64/bin' % MSYSDIR)
 
-    target = args[0]
-    target_path = os.path.abspath(os.path.dirname(target))
-    deps = getdeps(target, lib_search_path, recursive)
+    target_path = os.path.abspath(os.path.dirname(args.target))
+    deps = getdeps(args.target, lib_search_path, args.recursive)
     for dep in deps:
         dest = os.path.join(target_path, os.path.basename(dep))
         if dep == dest:
             continue
-        if dry_run:
-            print(dep,'->',dest)
-        else:
-            print(subprocess.check_output(['cp', '-a', dep, dest]))
+        if os.path.exists(dest):
+            continue
+        cmd = ['cp'] + (['-r'] if os.path.isdir(dep) else []) + [dep, dest]
+        if args.dry_run or args.verbose:
+            print(' '.join(cmd))
+        if not args.dry_run:
+            print(subprocess.check_output(cmd).decode('utf8'))
 
 if __name__ == '__main__':
     main(sys.argv[1:])
