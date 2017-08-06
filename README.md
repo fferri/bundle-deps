@@ -15,7 +15,8 @@ Requirements:
 
 ```text
 $ python3 bundle-deps/bundle-deps.py -h
-usage: bundle-deps.py [-h] [-r] [-n] [-v] [-L path] target
+error: environment variable QT5_DIR is not set
+usage: bundle-deps.py [-h] [-r] [-n] [-v] [-L path] [-W dep] target
 
 positional arguments:
   target                target to scan for required deps
@@ -27,5 +28,7 @@ optional arguments:
   -v, --verbose         print performed operations
   -L path, --lib-path path
                         additional path to search for deps
+  -W dep, --whitelist-dep dep
+                        the full path to a dependency to whitelist (will not be bundled, even if it is required); if it starts with a @ (e.g. @foo) the lines of the file (e.g. foo) will be added as whitelisted deps.
 ```
 

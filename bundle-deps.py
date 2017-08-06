@@ -9,14 +9,6 @@ platform_ids = {'Linux': 'linux', 'Darwin': 'macos', 'Windows': 'win32', 'MINGW6
 platform_id = platform_ids[platform.system().split('-')[0]]
 platform_case_sensitive = platform_id != 'win32'
 
-deps_whitelist = set()
-deps_whitelist_lower = set()
-with open('dlldeps-whitelist.%s' % platform_id, 'r') as f:
-    for line in f:
-        line = line.rstrip()
-        deps_whitelist.add(line)
-        deps_whitelist_lower.add(line.lower())
-
 def is_dep_whitelisted(d):
     if platform_case_sensitive:
         return d in deps_whitelist
@@ -200,8 +192,22 @@ def main(args):
     parser.add_argument('-n', '--dry-run', dest='dry_run', action='store_const', const=True, default=False, help='just print file which get copied without copying them')
     parser.add_argument('-v', '--verbose', dest='verbose', action='store_const', const=True, default=False, help='print performed operations')
     parser.add_argument('-L', '--lib-path', default=[], action='append', metavar='path', help='additional path to search for deps')
+    parser.add_argument('-W', '--whitelist-dep', default=[], action='append', metavar='dep', help='the full path to a dependency to whitelist (will not be bundled, even if it is required); if it starts with a @ (e.g. @foo) the lines of the file (e.g. foo) will be added as whitelisted deps.')
     parser.add_argument('target', help='target to scan for required deps')
     args = parser.parse_args()
+
+    deps_whitelist = set()
+    deps_whitelist_lower = set()
+    for dep in args.whitelist_dep:
+        if dep[0] == '@' and len(dep) > 1:
+            with open(dep[1:], 'r') as f:
+                for line in f:
+                    line = line.rstrip()
+                    deps_whitelist.add(line)
+                    deps_whitelist_lower.add(line.lower())
+        else:
+            deps_whitelist.add(dep)
+            deps_whitelist_lower.add(dep.lower())
 
     lib_search_path = []
     for path in args.lib_path:
