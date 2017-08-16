@@ -62,7 +62,7 @@ def scandeps_linux(lib0):
         if not line: continue
         m = re.match(r'^\s*((\S+) => )?((\S*) \((0x[0-9a-f]+)\)|not found)$', line)
         if m:
-            lib = m.group(2) if m.group(2) else m.group(4)
+            lib = m.group(2) or m.group(4)
             if lib == 'linux-vdso.so.1': continue
             yield lib
 
