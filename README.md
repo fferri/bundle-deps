@@ -15,7 +15,6 @@ Requirements:
 
 ```text
 $ python3 bundle-deps/bundle-deps.py -h
-error: environment variable QT5_DIR is not set
 usage: bundle-deps.py [-h] [-r] [-n] [-v] [-L path] [-W dep] target
 
 positional arguments:
