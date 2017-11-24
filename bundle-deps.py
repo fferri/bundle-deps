@@ -238,7 +238,7 @@ def main(args):
             continue
         if os.path.exists(dest):
             continue
-        cmd = ['cp'] + (['-r'] if os.path.isdir(dep) else []) + [dep, dest]
+        cmd = ['cp'] + (['-a'] if os.path.isdir(dep) else []) + [dep, dest]
         if args.dry_run or args.verbose:
             print(' '.join(cmd))
         if not args.dry_run:
