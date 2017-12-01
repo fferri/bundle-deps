@@ -120,16 +120,15 @@ def find_dumpbin_win32():
     msvc_dir = None
     for d1 in ['c:']:
         for d2 in ['Program Files', 'Program Files (x86)']:
-            for d3 in ['Microsoft Visual Studio']:
-                for d4 in ['2017','2015']:
-                    p = os.path.sep.join([d1,d2,d3,d4,''])
-                    if os.path.isdir(p): msvc_dir = p
+            for d3 in ['Microsoft Visual Studio', 'Microsoft Visual Studio 14.0']:
+                p = os.path.sep.join([d1,d2,d3,''])
+                if os.path.isdir(p): msvc_dir = p
     if not msvc_dir:
         raise RuntimeError('cannot find MSVC directory')
-    l = glob.glob(msvc_dir+'Community/VC/Tools/MSVC/*/bin/HostX64/x64/dumpbin.exe')
-    l.sort()
-    if os.path.isfile(l[-1]):
-        return l[-1]
+    l = glob.glob(msvc_dir+'*/Community/VC/Tools/MSVC/*/bin/HostX64/x64/dumpbin.exe')
+    if l and os.path.isfile(l[-1]): return l[-1]
+    l = glob.glob(msvc_dir+'VC/bin/dumpbin.exe')
+    if l and os.path.isfile(l[-1]): return l[-1]
     raise RuntimeError('cannot find dumpbin.exe in MSVC directory')
 
 def scandeps_win32(lib0):
