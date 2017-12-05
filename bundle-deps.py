@@ -220,8 +220,14 @@ def main(args):
         lib_search_path.append('/usr/lib')
         lib_search_path.append('/usr/lib/%s-linux-gnu' % platform.machine())
         lib_search_path.append('/usr/local/lib')
+        for p in os.environ.get('LD_LIBRARY_PATH', '').split(':'):
+            if p == '': continue
+            lib_search_path.append(p)
     elif platform_id == 'macos':
         lib_search_path.append('/usr/local/lib')
+        for p in os.environ.get('DYLD_LIBRARY_PATH', '').split(':'):
+            if p == '': continue
+            lib_search_path.append(p)
     elif platform_id == 'win32':
         WINDIR = os.environ.get('WINDIR', 'c:/windows').replace('\\','/')
         lib_search_path.append('%s/system32' % WINDIR)
